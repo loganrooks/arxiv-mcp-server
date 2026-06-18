@@ -1,6 +1,36 @@
+# Pre-commit gates (mission-0 W2). Install once:  pre-commit install --install-hooks
+# CI (.github/workflows/ci.yml) runs `pre-commit run --all-files`, so the same
+# gates enforce in CI even if a contributor has not installed the local hooks.
+# All hooks are `language: system` and use the tools from the project env
+# (`pip install -e ".[test]"`), so local and CI run identical tool versions.
+default_install_hook_types: [pre-commit, pre-push]
 repos:
-  - repo: https://github.com/psf/black
-    rev: 24.10.0
+  - repo: local
     hooks:
       - id: black
-        language_version: python3.11
+        name: black (format check)
+        entry: black --check
+        language: system
+        types: [python]
+      - id: secret-scan
+        name: secret scan (no credentials in git)
+        entry: python scripts/secret_scan.py
+        language: system
+        pass_filenames: true
+      - id: check-citations
+        name: citation guardrail (no opaque tokens)
+        entry: python scripts/check_citations.py
+        language: system
+        files: \.md$
+      - id: check-claim-ledger
+        name: claim-ledger schema
+        entry: python scripts/check_claim_ledger.py
+        language: system
+        files: claim-ledger\.md$
+      - id: pytest
+        name: pytest (pre-push)
+        entry: python -m pytest -q
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]
