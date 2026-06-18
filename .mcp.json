@@ -1,8 +1,8 @@
 {
   "mcpServers": {
     "arxiv": {
-      "command": "uvx",
-      "args": ["arxiv-mcp-server"]
+      "command": "sh",
+      "args": ["scripts/run-server.sh"]
     }
   }
 }
