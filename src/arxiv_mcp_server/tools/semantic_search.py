@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
+from contextlib import closing
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -183,7 +184,7 @@ def _upsert_index_record(
     embedding = _embed_text(abstract)
     embedding_array = np.asarray(embedding, dtype=np.float32)
 
-    with _connect() as conn:
+    with closing(_connect()) as conn:
         conn.execute(
             """
             INSERT INTO semantic_index (
@@ -265,7 +266,7 @@ def index_paper_from_result(paper: Any) -> bool:
 
 def _load_vectors(exclude_paper_id: Optional[str] = None) -> List[Dict[str, Any]]:
     """Load all vectors (optionally excluding one paper)."""
-    with _connect() as conn:
+    with closing(_connect()) as conn:
         if exclude_paper_id:
             rows = conn.execute(
                 "SELECT * FROM semantic_index WHERE paper_id != ?", (exclude_paper_id,)
@@ -327,7 +328,7 @@ def _rank_by_similarity(
 
 def _get_indexed_paper_vector(paper_id: str) -> Optional[Any]:
     """Fetch an indexed vector for a specific paper."""
-    with _connect() as conn:
+    with closing(_connect()) as conn:
         row = conn.execute(
             "SELECT embedding, embedding_dim FROM semantic_index WHERE paper_id = ?",
             (paper_id,),
@@ -352,7 +353,7 @@ def rebuild_index(clear_existing: bool = True) -> Dict[str, Any]:
     )
 
     if clear_existing:
-        with _connect() as conn:
+        with closing(_connect()) as conn:
             conn.execute("DELETE FROM semantic_index")
             conn.commit()
 
