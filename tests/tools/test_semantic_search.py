@@ -246,6 +246,45 @@ async def test_semantic_search_compact_with_offset(semantic_test_env):
 
 
 @pytest.mark.asyncio
+async def test_semantic_search_compact_strict_boolean(semantic_test_env):
+    """A truthy non-bool like the string 'false' must NOT enable compact (codex P2).
+
+    bool('false') is True; mirroring citation_graph's `is True` guard keeps a lax
+    client from silently dropping abstracts and flipping into paginated mode.
+    """
+    _index_three_papers()
+
+    response = await semantic_module.handle_semantic_search(
+        {"query": "vision transformer", "max_results": 3, "compact": "false"}
+    )
+
+    payload = json.loads(response[0].text)
+    # Not compact, not paginated -> the legacy shape with abstracts present.
+    assert set(payload.keys()) == {"mode", "query", "total_results", "papers"}
+    assert all("abstract" in p for p in payload["papers"])
+
+
+@pytest.mark.asyncio
+async def test_semantic_search_zero_page_size_no_cursor_loop(semantic_test_env):
+    """max_results=0 in paginated mode yields an empty page with next_offset None (codex P2).
+
+    Otherwise next_offset == offset and a client following the cursor loops forever
+    on the same empty page.
+    """
+    _index_three_papers()
+
+    response = await semantic_module.handle_semantic_search(
+        {"query": "vision transformer", "max_results": 0, "offset": 0, "compact": True}
+    )
+
+    payload = json.loads(response[0].text)
+    assert payload["total_results"] == 0
+    assert payload["papers"] == []
+    # The empty page must not advertise a self-referential cursor.
+    assert payload["next_offset"] is None
+
+
+@pytest.mark.asyncio
 async def test_reindex_uses_local_markdown_ids(
     monkeypatch, semantic_test_env, temp_storage_path
 ):

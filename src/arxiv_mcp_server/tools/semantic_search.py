@@ -397,7 +397,10 @@ async def handle_semantic_search(arguments: Dict[str, Any]) -> List[types.TextCo
         paper_id = (arguments.get("paper_id") or "").strip()
         max_results = min(int(arguments.get("max_results", 10)), settings.MAX_RESULTS)
         offset = max(0, int(arguments.get("offset", 0) or 0))
-        compact = bool(arguments.get("compact", False))
+        # Strict boolean (like citation_graph's `compact`/`counts_only`): a string
+        # such as "false" is truthy under bool(), which would silently drop every
+        # abstract and switch into paginated mode.
+        compact = arguments.get("compact") is True
 
         if not query and not paper_id:
             return [
@@ -466,8 +469,11 @@ async def handle_semantic_search(arguments: Dict[str, Any]) -> List[types.TextCo
             next_offset = offset + len(ranked)
             response["offset"] = offset
             response["total_available"] = total_available
+            # Only emit a cursor when this page actually returned results. An empty
+            # page (e.g. max_results=0, or offset past the end) must not point a
+            # client back at the same offset, or it loops forever.
             response["next_offset"] = (
-                next_offset if next_offset < total_available else None
+                next_offset if ranked and next_offset < total_available else None
             )
         response["papers"] = papers
 
