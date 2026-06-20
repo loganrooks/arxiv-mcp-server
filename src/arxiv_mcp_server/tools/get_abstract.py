@@ -13,7 +13,6 @@ from .search import (
     ARXIV_HEADERS,
     ARXIV_API_URL,
     _MIN_REQUEST_INTERVAL,
-    _last_request_time,
 )
 import httpx
 import xml.etree.ElementTree as ET
