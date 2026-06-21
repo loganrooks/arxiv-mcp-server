@@ -138,8 +138,12 @@ async def test_check_alerts_isolates_per_topic_failure(monkeypatch, alerts_test_
 
     monkeypatch.setattr(alerts_module, "_raw_arxiv_search", _mock_raw_search)
 
-    await alerts_module.handle_watch_topic({"topic": "good"})
+    # Register the FAILING topic first: the loop must continue PAST an early
+    # failure to reach the later success. This is the discriminating F7 case —
+    # the old single-try/post-loop-save code aborted the whole batch on the
+    # first exception, losing every topic's advance.
     await alerts_module.handle_watch_topic({"topic": "flaky"})
+    await alerts_module.handle_watch_topic({"topic": "good"})
 
     response = await alerts_module.handle_check_alerts({})
     payload = json.loads(response[0].text)

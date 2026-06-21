@@ -72,9 +72,12 @@ check_alerts_tool = types.Tool(
         "Check all saved topic watches for newly published papers since the last check. "
         "Omitting the topic parameter runs ALL saved watches and returns new papers for each. "
         "Passing a topic string checks only that specific watch. "
-        "Updates each watch's last_checked timestamp after running, so subsequent calls only return newer papers. "
+        "Updates each watch's last_checked timestamp after a SUCCESSFUL check, so subsequent calls only return newer papers. "
+        "Topics are checked independently: if one topic's search fails (e.g. a transient arXiv error or rate limit), "
+        "its entry carries an `error` field with `new_paper_count: 0` and its last_checked is left unchanged so it retries "
+        "next call, while the other topics still return normally. "
         "Use watch_topic to register topics before calling this. "
-        "Returns a summary with new paper counts and full paper metadata per topic."
+        "Returns a summary with per-topic new paper counts and full paper metadata (plus an `error` field for any topic that failed)."
     ),
     inputSchema={
         "type": "object",
@@ -235,12 +238,11 @@ async def handle_check_alerts(arguments: Dict[str, Any]) -> List[types.TextConte
                 continue
 
             last_checked = topic.get("last_checked")
+            max_results = min(int(topic.get("max_results", 10)), settings.MAX_RESULTS)
             try:
                 search_results = await _raw_arxiv_search(
                     query=topic_query,
-                    max_results=min(
-                        int(topic.get("max_results", 10)), settings.MAX_RESULTS
-                    ),
+                    max_results=max_results,
                     sort_by="date",
                     date_from=last_checked,
                     categories=topic.get("categories") or None,
@@ -250,7 +252,10 @@ async def handle_check_alerts(arguments: Dict[str, Any]) -> List[types.TextConte
                 # limit on this N-search loop) must not abort the whole batch or
                 # roll back topics that already succeeded. Report the error for
                 # this topic, leave its last_checked untouched so it is retried
-                # next run, and continue to the next topic.
+                # next run, and continue to the next topic. The try wraps only
+                # the network call — a malformed record (e.g. a non-int
+                # max_results) surfaces loudly via the outer handler rather than
+                # being masked here as a transient per-topic error.
                 logger.error("check_alerts: topic %r failed: %s", topic_query, exc)
                 alerts.append(
                     {
