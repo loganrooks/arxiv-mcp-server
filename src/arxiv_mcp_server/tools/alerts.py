@@ -235,15 +235,33 @@ async def handle_check_alerts(arguments: Dict[str, Any]) -> List[types.TextConte
                 continue
 
             last_checked = topic.get("last_checked")
-            search_results = await _raw_arxiv_search(
-                query=topic_query,
-                max_results=min(
-                    int(topic.get("max_results", 10)), settings.MAX_RESULTS
-                ),
-                sort_by="date",
-                date_from=last_checked,
-                categories=topic.get("categories") or None,
-            )
+            try:
+                search_results = await _raw_arxiv_search(
+                    query=topic_query,
+                    max_results=min(
+                        int(topic.get("max_results", 10)), settings.MAX_RESULTS
+                    ),
+                    sort_by="date",
+                    date_from=last_checked,
+                    categories=topic.get("categories") or None,
+                )
+            except Exception as exc:
+                # One topic's search failure (a transient arXiv error, a rate
+                # limit on this N-search loop) must not abort the whole batch or
+                # roll back topics that already succeeded. Report the error for
+                # this topic, leave its last_checked untouched so it is retried
+                # next run, and continue to the next topic.
+                logger.error("check_alerts: topic %r failed: %s", topic_query, exc)
+                alerts.append(
+                    {
+                        "topic": topic_query,
+                        "last_checked": last_checked,
+                        "error": str(exc),
+                        "new_paper_count": 0,
+                        "new_papers": [],
+                    }
+                )
+                continue
 
             new_papers = [
                 paper
@@ -262,9 +280,12 @@ async def handle_check_alerts(arguments: Dict[str, Any]) -> List[types.TextConte
 
             topic["last_checked"] = now_iso
             topic["updated_at"] = now_iso
-
-        payload["topics"] = all_topics
-        _save_watches(payload)
+            # Persist each topic's advance as soon as it succeeds. _save_watches
+            # is atomic (temp + fsync + os.replace, B5), so saving per checked
+            # topic is safe and means a later failure or interrupt cannot make
+            # this topic re-report papers it has already seen.
+            payload["topics"] = all_topics
+            _save_watches(payload)
 
         result = {
             "status": "success",
