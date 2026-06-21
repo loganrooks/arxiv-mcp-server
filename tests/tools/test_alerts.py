@@ -108,3 +108,56 @@ async def test_check_alerts_handles_partial_paper_fields(monkeypatch, alerts_tes
     assert len(response) >= 1
     payload = json.loads(response[0].text)
     assert "status" in payload
+
+
+@pytest.mark.asyncio
+async def test_check_alerts_isolates_per_topic_failure(monkeypatch, alerts_test_env):
+    """One topic's search failure must not abort the batch or roll back the
+    last_checked advance of topics that already succeeded (B6 / F7 regression).
+
+    Before the fix, the whole loop ran under one try/except with a single
+    post-loop save, so any topic's failure skipped _save_watches entirely and
+    every topic re-reported its papers on the next run.
+    """
+
+    async def _mock_raw_search(**kwargs):
+        if kwargs.get("query") == "flaky":
+            raise RuntimeError("arXiv 429 rate limit")
+        return [
+            {
+                "id": "2501.00010",
+                "title": "Good Paper",
+                "authors": ["A"],
+                "abstract": "x",
+                "categories": ["cs.AI"],
+                "published": "2025-01-01T00:00:00Z",
+                "url": "https://arxiv.org/pdf/2501.00010",
+                "resource_uri": "arxiv://2501.00010",
+            }
+        ]
+
+    monkeypatch.setattr(alerts_module, "_raw_arxiv_search", _mock_raw_search)
+
+    # Register the FAILING topic first: the loop must continue PAST an early
+    # failure to reach the later success. This is the discriminating F7 case —
+    # the old single-try/post-loop-save code aborted the whole batch on the
+    # first exception, losing every topic's advance.
+    await alerts_module.handle_watch_topic({"topic": "flaky"})
+    await alerts_module.handle_watch_topic({"topic": "good"})
+
+    response = await alerts_module.handle_check_alerts({})
+    payload = json.loads(response[0].text)
+
+    # The batch completes (not an error envelope) despite one topic failing.
+    assert payload["status"] == "success"
+    alerts_by_topic = {a["topic"]: a for a in payload["alerts"]}
+    assert alerts_by_topic["good"]["new_paper_count"] == 1
+    assert "error" not in alerts_by_topic["good"]
+    assert "error" in alerts_by_topic["flaky"]
+    assert alerts_by_topic["flaky"]["new_paper_count"] == 0
+
+    # The successful topic's last_checked was persisted; the failed one's was
+    # left untouched so it retries (and does not silently skip) next run.
+    saved = {t["topic"]: t for t in alerts_module._load_watches()["topics"]}
+    assert saved["good"].get("last_checked") is not None
+    assert saved["flaky"].get("last_checked") is None
