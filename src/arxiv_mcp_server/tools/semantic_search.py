@@ -78,6 +78,7 @@ semantic_search_tool = types.Tool(
             },
             "max_results": {
                 "type": "integer",
+                "minimum": 0,
                 "description": "Maximum number of results to return (default: 10).",
                 "default": 10,
             },
@@ -134,21 +135,28 @@ def _db_path() -> Path:
 def _connect() -> sqlite3.Connection:
     """Open SQLite connection and ensure schema exists."""
     conn = sqlite3.connect(_db_path())
-    conn.row_factory = sqlite3.Row
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS semantic_index (
-            paper_id TEXT PRIMARY KEY,
-            title TEXT NOT NULL,
-            abstract TEXT NOT NULL,
-            authors_json TEXT NOT NULL,
-            categories_json TEXT NOT NULL,
-            published TEXT,
-            embedding BLOB NOT NULL,
-            embedding_dim INTEGER NOT NULL,
-            updated_at TEXT NOT NULL
-        )
-        """)
-    conn.commit()
+    try:
+        conn.row_factory = sqlite3.Row
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS semantic_index (
+                paper_id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                abstract TEXT NOT NULL,
+                authors_json TEXT NOT NULL,
+                categories_json TEXT NOT NULL,
+                published TEXT,
+                embedding BLOB NOT NULL,
+                embedding_dim INTEGER NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """)
+        conn.commit()
+    except Exception:
+        # Schema init failed after the connection opened — close it rather than
+        # leak it. Callers use `with closing(_connect())`, which never receives
+        # (and so never closes) the connection if _connect raises mid-setup.
+        conn.close()
+        raise
     return conn
 
 
@@ -395,7 +403,12 @@ async def handle_semantic_search(arguments: Dict[str, Any]) -> List[types.TextCo
 
         query = (arguments.get("query") or "").strip()
         paper_id = (arguments.get("paper_id") or "").strip()
-        max_results = min(int(arguments.get("max_results", 10)), settings.MAX_RESULTS)
+        # Clamp to [0, MAX_RESULTS]: a negative max_results would otherwise feed a
+        # negative slice bound into _rank_by_similarity (offset:offset+max_results),
+        # producing surprising pages/cursors. 0 stays valid (empty page).
+        max_results = min(
+            max(0, int(arguments.get("max_results", 10))), settings.MAX_RESULTS
+        )
         # Capture whether `offset` was explicitly provided (even as 0): an
         # explicit offset opts into paginated mode so the client gets cursor
         # metadata to page forward. `offset` omitted (or null) stays legacy.

@@ -215,6 +215,54 @@ async def test_semantic_search_explicit_offset_zero_is_paginated(semantic_test_e
 
 
 @pytest.mark.asyncio
+async def test_semantic_search_negative_max_results_clamped(semantic_test_env):
+    """A negative max_results is clamped to 0 (empty page), not passed as a
+    negative slice bound — no crash, no nonsensical cursor (codex cross-vendor
+    finding: max_results was only upper-clamped)."""
+    _index_three_papers()
+
+    response = await semantic_module.handle_semantic_search(
+        {"query": "vision transformer", "max_results": -5, "offset": 0}
+    )
+
+    payload = json.loads(response[0].text)
+    assert payload["total_results"] == 0
+    assert payload["papers"] == []
+    # offset:0 is explicit -> paginated, but an empty page emits no cursor.
+    assert payload["offset"] == 0
+    assert payload["next_offset"] is None
+
+
+def test_connect_closes_connection_on_schema_init_failure(
+    monkeypatch, semantic_test_env
+):
+    """If schema setup raises, _connect closes the connection it opened instead
+    of leaking it (codex cross-vendor finding: closing() at the call sites does
+    not cover a failure inside _connect itself)."""
+    import sqlite3
+
+    closed = {"value": False}
+
+    class _FakeConn:
+        row_factory = None
+
+        def execute(self, *args, **kwargs):
+            raise sqlite3.OperationalError("schema init boom")
+
+        def commit(self):  # pragma: no cover - not reached
+            pass
+
+        def close(self):
+            closed["value"] = True
+
+    monkeypatch.setattr(semantic_module.sqlite3, "connect", lambda *a, **k: _FakeConn())
+
+    with pytest.raises(sqlite3.OperationalError):
+        semantic_module._connect()
+    assert closed["value"] is True
+
+
+@pytest.mark.asyncio
 async def test_semantic_search_next_offset_null_at_end(semantic_test_env):
     """An offset that reaches the last page yields next_offset is None."""
     _index_three_papers()
