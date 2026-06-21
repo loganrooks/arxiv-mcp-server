@@ -396,7 +396,11 @@ async def handle_semantic_search(arguments: Dict[str, Any]) -> List[types.TextCo
         query = (arguments.get("query") or "").strip()
         paper_id = (arguments.get("paper_id") or "").strip()
         max_results = min(int(arguments.get("max_results", 10)), settings.MAX_RESULTS)
-        offset = max(0, int(arguments.get("offset", 0) or 0))
+        # Capture whether `offset` was explicitly provided (even as 0): an
+        # explicit offset opts into paginated mode so the client gets cursor
+        # metadata to page forward. `offset` omitted (or null) stays legacy.
+        offset_arg = arguments.get("offset")
+        offset = max(0, int(offset_arg or 0))
         # Strict boolean (like citation_graph's `compact`/`counts_only`): a string
         # such as "false" is truthy under bool(), which would silently drop every
         # abstract and switch into paginated mode.
@@ -457,9 +461,12 @@ async def handle_semantic_search(arguments: Dict[str, Any]) -> List[types.TextCo
                 paper_dict.pop("abstract", None)
             papers.append(paper_dict)
 
-        # PAGINATED MODE = offset > 0 or compact. The default (offset == 0 and not
-        # compact) leaves the response byte-for-byte identical to the legacy shape.
-        paginated = offset > 0 or compact
+        # PAGINATED MODE = `offset` explicitly provided (even 0) or `compact`.
+        # Only the default — `offset` omitted AND not compact — leaves the
+        # response byte-for-byte identical to the legacy shape. An explicit
+        # `offset: 0` is a deliberate opt-in: unlike citation_graph there is no
+        # separate `limit` param to trigger pagination while starting at 0.
+        paginated = offset_arg is not None or compact
         response = {
             "mode": mode,
             "query": query_payload,

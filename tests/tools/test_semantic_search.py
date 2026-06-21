@@ -192,6 +192,29 @@ async def test_semantic_search_default_output_unchanged(semantic_test_env):
 
 
 @pytest.mark.asyncio
+async def test_semantic_search_explicit_offset_zero_is_paginated(semantic_test_env):
+    """Explicit offset=0 (no compact) opts into pagination: cursor metadata is
+    present so a client can discover/follow page 2, while abstracts are still
+    included (only `compact` drops them). Distinguishes an explicit offset:0 from
+    an omitted offset (codex P2 — honor explicit offset=0 pagination requests)."""
+    _index_three_papers()
+
+    response = await semantic_module.handle_semantic_search(
+        {"query": "vision transformer", "max_results": 1, "offset": 0}
+    )
+
+    payload = json.loads(response[0].text)
+    # Paginated shape: cursor metadata present even though offset is 0...
+    assert payload["offset"] == 0
+    assert payload["total_available"] == 3
+    # offset(0) + returned(1) = 1 < total_available(3) -> next page at 1.
+    assert payload["next_offset"] == 1
+    # ...but not compact, so abstracts remain.
+    for paper in payload["papers"]:
+        assert "abstract" in paper
+
+
+@pytest.mark.asyncio
 async def test_semantic_search_next_offset_null_at_end(semantic_test_env):
     """An offset that reaches the last page yields next_offset is None."""
     _index_three_papers()
