@@ -45,44 +45,48 @@ class StubManager:
 
 
 def _three_paper_fixture():
-    """A -> B, A -> C, B -> C induced graph with a built-in disagreement.
+    """0001 -> 0002, 0001 -> 0003, 0002 -> 0003 induced graph with a disagreement.
 
-    In-degrees: C=2, B=1, A=0  => local pagerank C > B > A.
-    Global citations: A=1000, B=50, C=2 => global rank A > B > C.
-    So C is the corpus hidden gem (top locally, bottom globally).
+    Uses realistic arXiv IDs (2401.0001/0002/0003) so the handler's
+    is_valid_arxiv_id stem filter passes them through; the pure core would
+    accept any string, but the handler tests reuse this fixture.
+
+    In-degrees: 0003=2, 0002=1, 0001=0  => local pagerank 0003 > 0002 > 0001.
+    Global citations: 0001=1000, 0002=50, 0003=2 => global rank 0001 > 0002 > 0003.
+    So 0003 is the corpus hidden gem (top locally, bottom globally).
     """
     s2_data = {
-        "A": {
-            "title": "Paper A",
+        "2401.0001": {
+            "title": "Paper One",
             "citationCount": 1000,
             "influentialCitationCount": 100,
             "authors": [{"hIndex": 30}, {"hIndex": 5}],
             "references": [
-                {"externalIds": {"ArXiv": "B"}},
-                {"externalIds": {"ArXiv": "C"}},
+                {"externalIds": {"ArXiv": "2401.0002"}},
+                {"externalIds": {"ArXiv": "2401.0003"}},
                 # A non-local reference must NOT create an edge (v1: no expansion).
                 {"externalIds": {"ArXiv": "Z-not-local"}},
                 # A reference with no ArXiv id is skipped.
                 {"externalIds": {"DOI": "10.x/y"}},
             ],
         },
-        "B": {
-            "title": "Paper B",
+        "2401.0002": {
+            "title": "Paper Two",
             "citationCount": 50,
             "influentialCitationCount": 10,
             "authors": [{"hIndex": 12}],
-            "references": [{"externalIds": {"ArXiv": "C"}}],
+            "references": [{"externalIds": {"ArXiv": "2401.0003"}}],
         },
-        "C": {
-            "title": "Paper C",
+        "2401.0003": {
+            "title": "Paper Three",
             "citationCount": 2,
             "influentialCitationCount": 0,
             "authors": [{"hIndex": 3}],
             "references": [],
         },
     }
-    has_code_map = {"A": True, "B": False, "C": False}
-    return ["A", "B", "C"], s2_data, has_code_map
+    has_code_map = {"2401.0001": True, "2401.0002": False, "2401.0003": False}
+    return ["2401.0001", "2401.0002", "2401.0003"], s2_data, has_code_map
 
 
 # ---------------------------------------------------------------------------
@@ -102,32 +106,36 @@ def test_build_rows_ranking_and_delta():
     rows = {row["arxiv_id"]: row for row in result["papers"]}
 
     # In-degrees in the induced subgraph.
-    assert rows["C"]["local_citations"] == 2
-    assert rows["B"]["local_citations"] == 1
-    assert rows["A"]["local_citations"] == 0
+    assert rows["2401.0003"]["local_citations"] == 2
+    assert rows["2401.0002"]["local_citations"] == 1
+    assert rows["2401.0001"]["local_citations"] == 0
 
-    # PageRank ordering: C > B > A.
-    assert rows["C"]["pagerank"] > rows["B"]["pagerank"] > rows["A"]["pagerank"]
-    # Sorted by pagerank desc -> C is first.
-    assert result["papers"][0]["arxiv_id"] == "C"
+    # PageRank ordering: 0003 > 0002 > 0001.
+    assert (
+        rows["2401.0003"]["pagerank"]
+        > rows["2401.0002"]["pagerank"]
+        > rows["2401.0001"]["pagerank"]
+    )
+    # Sorted by pagerank desc -> 0003 is first.
+    assert result["papers"][0]["arxiv_id"] == "2401.0003"
 
     # Disagreement delta = global_rank - pagerank_rank (rank 1 = best).
-    # pagerank ranks: C=1, B=2, A=3 ; global ranks: A=1, B=2, C=3.
-    # C (local_citations 2) and B (1) have in-library citations -> real deltas.
-    assert rows["C"]["local_vs_global_delta"] == 2  # 3 - 1 : hidden gem (positive)
-    assert rows["B"]["local_vs_global_delta"] == 0  # 2 - 2
-    # A has 0 in-library citations (PageRank dangling floor) -> null delta (FIX 1),
-    # not the alphabetical-noise value its ordinal ranks would otherwise produce.
-    assert rows["A"]["local_citations"] == 0
-    assert rows["A"]["local_vs_global_delta"] is None
+    # pagerank ranks: 0003=1, 0002=2, 0001=3 ; global ranks: 0001=1, 0002=2, 0003=3.
+    # 0003 (local_citations 2) and 0002 (1) have in-library citations -> real deltas.
+    assert rows["2401.0003"]["local_vs_global_delta"] == 2  # 3 - 1 : hidden gem
+    assert rows["2401.0002"]["local_vs_global_delta"] == 0  # 2 - 2
+    # 0001 has 0 in-library citations (PageRank dangling floor) -> null delta
+    # (FIX 1), not the alphabetical-noise value its ordinal ranks would produce.
+    assert rows["2401.0001"]["local_citations"] == 0
+    assert rows["2401.0001"]["local_vs_global_delta"] is None
 
     # Pass-through signal columns.
-    assert rows["A"]["global_citations"] == 1000
-    assert rows["A"]["influential_citations"] == 100
-    assert rows["A"]["max_author_hindex"] == 30  # max(30, 5)
-    assert rows["A"]["has_code"] is True
-    assert rows["C"]["has_code"] is False
-    assert rows["C"]["title"] == "Paper C"
+    assert rows["2401.0001"]["global_citations"] == 1000
+    assert rows["2401.0001"]["influential_citations"] == 100
+    assert rows["2401.0001"]["max_author_hindex"] == 30  # max(30, 5)
+    assert rows["2401.0001"]["has_code"] is True
+    assert rows["2401.0003"]["has_code"] is False
+    assert rows["2401.0003"]["title"] == "Paper Three"
 
 
 def test_build_rows_output_keys_exact():
@@ -292,8 +300,8 @@ def test_build_rows_top_k_truncation():
     library_ids, s2_data, has_code_map = _three_paper_fixture()
     result = build_influence_rows(library_ids, s2_data, has_code_map, top_k=1)
     assert len(result["papers"]) == 1
-    # Highest pagerank (C) survives truncation.
-    assert result["papers"][0]["arxiv_id"] == "C"
+    # Highest pagerank (0003) survives truncation.
+    assert result["papers"][0]["arxiv_id"] == "2401.0003"
     # graph stats reflect the FULL induced graph, not the truncated rows.
     assert result["graph"]["nodes"] == 3
 
@@ -388,9 +396,9 @@ async def test_handle_library_influence_happy_path(monkeypatch):
     """Full handler: stub PaperManager + injected S2 batch, success envelope."""
     library_ids, s2_data, _ = _three_paper_fixture()
     content = {
-        "A": "code at https://github.com/org/a",
-        "B": "no code here",
-        "C": "no code here",
+        "2401.0001": "code at https://github.com/org/a",
+        "2401.0002": "no code here",
+        "2401.0003": "no code here",
     }
     monkeypatch.setattr(
         influence, "_get_paper_manager", lambda: StubManager(library_ids, content)
@@ -408,9 +416,9 @@ async def test_handle_library_influence_happy_path(monkeypatch):
     assert payload["library_size"] == 3
     assert payload["graph"] == {"nodes": 3, "edges": 3}
     rows = {row["arxiv_id"]: row for row in payload["papers"]}
-    assert rows["A"]["has_code"] is True
-    assert rows["B"]["has_code"] is False
-    assert payload["papers"][0]["arxiv_id"] == "C"
+    assert rows["2401.0001"]["has_code"] is True
+    assert rows["2401.0002"]["has_code"] is False
+    assert payload["papers"][0]["arxiv_id"] == "2401.0003"
 
 
 @pytest.mark.asyncio
@@ -429,13 +437,13 @@ async def test_handle_library_influence_paper_ids_filter(monkeypatch):
 
     monkeypatch.setattr(influence, "_fetch_s2_batch", fake_fetch)
 
-    response = await handle_library_influence({"paper_ids": ["A", "C"]})
+    response = await handle_library_influence({"paper_ids": ["2401.0001", "2401.0003"]})
     payload = json.loads(response[0].text)
 
     assert payload["library_size"] == 2
-    assert sorted(captured["ids"]) == ["A", "C"]
+    assert sorted(captured["ids"]) == ["2401.0001", "2401.0003"]
     returned_ids = {row["arxiv_id"] for row in payload["papers"]}
-    assert returned_ids == {"A", "C"}
+    assert returned_ids == {"2401.0001", "2401.0003"}
 
 
 @pytest.mark.asyncio
@@ -634,6 +642,31 @@ async def test_handle_duplicate_versions_collapsed(monkeypatch):
     assert payload["graph"]["nodes"] == 1
     assert payload["papers"][0]["arxiv_id"] == "2401.0001"
     assert any("collapsed" in note.lower() for note in payload["notes"])
+
+
+@pytest.mark.asyncio
+async def test_handle_filters_non_arxiv_stems(monkeypatch):
+    """A stray non-arXiv-ID `.md` stem is dropped, not queried as a bogus node."""
+    stems = ["2401.0001", "README", "notes-2026"]  # only the first is a valid id
+    monkeypatch.setattr(influence, "_get_paper_manager", lambda: StubManager(stems))
+
+    captured = {}
+
+    async def fake_fetch(ids):
+        captured["ids"] = list(ids)
+        return {
+            aid: {"title": aid, "citationCount": 1, "references": []} for aid in ids
+        }
+
+    monkeypatch.setattr(influence, "_fetch_s2_batch", fake_fetch)
+
+    response = await handle_library_influence({})
+    payload = json.loads(response[0].text)
+
+    # Only the valid arXiv id becomes a node / an S2 query.
+    assert captured["ids"] == ["2401.0001"]
+    assert payload["library_size"] == 1
+    assert {row["arxiv_id"] for row in payload["papers"]} == {"2401.0001"}
 
 
 # ---------------------------------------------------------------------------

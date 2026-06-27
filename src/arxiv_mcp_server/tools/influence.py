@@ -44,6 +44,7 @@ from .citation_graph import (
     _backoff_delay,
     _pace_request,
 )
+from .list_papers import is_valid_arxiv_id
 
 try:  # pragma: no cover - exercised via the runtime check / monkeypatched flag
     import networkx as nx
@@ -517,6 +518,10 @@ async def handle_library_influence(
 
         manager = _get_paper_manager()
         stems = await manager.list_papers()
+        # Keep only valid arXiv-ID stems — a stray non-paper `.md` in the storage
+        # dir would otherwise become a bogus `ARXIV:<stem>` S2 query + node.
+        # Mirrors the public list_papers / semantic-index paths.
+        stems = [s for s in stems if is_valid_arxiv_id(s)]
 
         # The paper_ids filter matches on canonical (unversioned) ids, so a user
         # passing `2401.12345` matches a local stem `2401.12345v2`. Use
